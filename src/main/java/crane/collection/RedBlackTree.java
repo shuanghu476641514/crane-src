@@ -2,7 +2,7 @@ package crane.collection;
 
 import java.util.TreeMap;
 
-public class RedBlackTreeDemo {
+public class RedBlackTree {
 
     /**
      * Node color enum. Easier to read than boolean when debugging.
@@ -567,7 +567,7 @@ public class RedBlackTreeDemo {
     // ==========================================
     public static void main(String[] args) {
 
-        RedBlackTreeDemo rbt = new RedBlackTreeDemo();
+        RedBlackTree rbt = new RedBlackTree();
 
         // 1. 插入测试
         int[] insertKeys = {100, 200, 300, 250};
