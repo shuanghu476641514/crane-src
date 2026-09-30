@@ -13,8 +13,10 @@ public class Clh {
     public void lock(){
         node.get().locked = true;
         Node pre =  tail.getAndSet(node.get());
-        while (pre.locked){
-
+        while (pre.locked) {
+            // 告诉 CPU：当前线程正在进行自旋等待
+            // 本身不会让线程进入阻塞状态，也不会像 Thread.sleep() 那样真正睡眠。
+            Thread.onSpinWait();
         }
     }
 
