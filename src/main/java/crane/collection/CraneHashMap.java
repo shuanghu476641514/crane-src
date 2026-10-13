@@ -202,6 +202,7 @@ public class CraneHashMap<K,V> {
                 V oldValue = e.value;
                 if (!onlyIfAbsent || oldValue == null)
                     e.value = value;
+                // 这是为了HashTreeNode访问元素后，调整访问次序
                 afterNodeAccess(e);
                 return oldValue;
             }
@@ -326,20 +327,70 @@ public class CraneHashMap<K,V> {
             // 虽然hash碰撞的厉害，但由于容量太小，还是先扩容，而不是树化
             resize();
         else if ((e = tab[index = (n - 1) & hash]) != null) {
-            TreeNode<K,V> hd = null, tl = null;
+            TreeNode<K,V> hd = null // 转换成Tree以后，还是有个链表结构，表头
+                , tl = null; // 表尾
             do {
+                // 将Node转成TreeNode
                 TreeNode<K,V> p = replacementTreeNode(e, null);
                 if (tl == null)
+                    // 树结构为空，表头指针指向TreeNode
                     hd = p;
                 else {
+                    // 将树节点插入到队尾
                     p.prev = tl;
+                    // 尾指针next指向新的节点
                     tl.next = p;
                 }
+                // 新节点成为最新的尾节点
                 tl = p;
             } while ((e = e.next) != null);
+            // 上述do-while循环，只是构建了一个TreeNode的链表
             if ((tab[index] = hd) != null)
+                // 单线程肯定执行，多线程，可能出现hd==null
+                // 头节点不为空，进行树化
                 hd.treeify(tab);
         }
+    }
+
+    final Node<K,V> removeNode(int hash, Object key, Object value,
+                               boolean matchValue, boolean movable) {
+        Node<K,V>[] tab; Node<K,V> p; int n, index;
+        if ((tab = table) != null && (n = tab.length) > 0 &&
+            (p = tab[index = (n - 1) & hash]) != null) {
+            Node<K,V> node = null, e; K k; V v;
+            if (p.hash == hash &&
+                ((k = p.key) == key || (key != null && key.equals(k))))
+                node = p;
+            else if ((e = p.next) != null) {
+                if (p instanceof TreeNode)
+                    node = ((TreeNode<K,V>)p).getTreeNode(hash, key);
+                else {
+                    do {
+                        if (e.hash == hash &&
+                            ((k = e.key) == key ||
+                             (key != null && key.equals(k)))) {
+                            node = e;
+                            break;
+                        }
+                        p = e;
+                    } while ((e = e.next) != null);
+                }
+            }
+            if (node != null && (!matchValue || (v = node.value) == value ||
+                                 (value != null && value.equals(v)))) {
+                if (node instanceof TreeNode)
+                    ((TreeNode<K,V>)node).removeTreeNode(this, tab, movable);
+                else if (node == p)
+                    tab[index] = node.next;
+                else
+                    p.next = node.next;
+                ++modCount;
+                --size;
+                afterNodeRemoval(node);
+                return node;
+            }
+        }
+        return null;
     }
 
     Node<K,V> newNode(int hash, K key, V value, Node<K,V> next) {
@@ -354,14 +405,21 @@ public class CraneHashMap<K,V> {
         return new TreeNode<>(hash, key, value, next);
     }
 
+    /**
+     *
+     * @param p 链表节点
+     * @param next 链表转树以后，还是维持链表的next
+     * @return 树Node
+     */
     TreeNode<K,V> replacementTreeNode(Node<K,V> p, Node<K,V> next) {
         return new TreeNode<>(p.hash, p.key, p.value, next);
     }
 
     void afterNodeAccess(Node<K,V> p) { }
     void afterNodeInsertion(boolean evict) { }
+    void afterNodeRemoval(Node<K,V> p) { }
 
-    static final class TreeNode<K,V> extends Node<K,V> {
+    static final class TreeNode<K,V> extends CraneLinkedHashMap.Entry<K,V> {
         TreeNode<K,V> parent;
         TreeNode<K,V> left;
         TreeNode<K,V> right;
@@ -428,6 +486,10 @@ public class CraneHashMap<K,V> {
             return null;
         }
 
+        final TreeNode<K,V> getTreeNode(int h, Object k) {
+            return ((parent != null) ? root() : this).find(h, k, null);
+        }
+
         static int tieBreakOrder(Object a, Object b) {
             int d;
             if (a == null || b == null ||
@@ -438,34 +500,48 @@ public class CraneHashMap<K,V> {
             return d;
         }
 
+        /**
+         * @param tab hash表
+         */
         final void treeify(Node<K,V>[] tab) {
-            TreeNode<K,V> root = null;
-            for (TreeNode<K,V> x = this, next; x != null; x = next) {
+            TreeNode<K,V> root = null;// 树的root
+            for (TreeNode<K,V> x = this, next // x就是当前链表队列待插入树内的node
+                ; x != null;
+                x = next) {
                 next = (TreeNode<K,V>)x.next;
+                // 先把节点的孩子置空，作为叶子节点插入
                 x.left = x.right = null;
                 if (root == null) {
+                    // 根是黑的
                     x.parent = null;
                     x.red = false;
                     root = x;
-                }
-                else {
+                } else {
                     K k = x.key;
                     int h = x.hash;
                     Class<?> kc = null;
                     for (TreeNode<K,V> p = root;;) {
-                        int dir, ph;
+                        // 红黑树，是有序的，以key的hash值，来排序
+                        int dir, // 2个key的大小关系
+                            ph;
                         K pk = p.key;
                         if ((ph = p.hash) > h)
+                            // 当前节点hash值，小于p(树内当前查找的节点)
                             dir = -1;
                         else if (ph < h)
                             dir = 1;
                         else if ((kc == null &&
+                            // 如果两个Key的hash值完全一样，则进行Key的比较
                                   (kc = comparableClassFor(k)) == null) ||
                                  (dir = compareComparables(kc, k, pk)) == 0)
+                            // 如果key的compare也一样，则强制比较出2个key的大小
                             dir = tieBreakOrder(k, pk);
 
                         TreeNode<K,V> xp = p;
                         if ((p = (dir <= 0) ? p.left : p.right) == null) {
+                            // 根据dir判断x该插入左节点，还是右节点
+                            // 如果当前p的孩子节点已经为空了，说明找到叶子了，可以将x插入了
+                            // xp就是待插入的父节点，p此时已经变成了孩子节点为null了
                             x.parent = xp;
                             if (dir <= 0)
                                 xp.left = x;
@@ -539,6 +615,104 @@ public class CraneHashMap<K,V> {
             }
         }
 
+        final void removeTreeNode(CraneHashMap<K,V> map, Node<K,V>[] tab,
+                                  boolean movable) {
+            int n;
+            if (tab == null || (n = tab.length) == 0)
+                return;
+            int index = (n - 1) & hash;
+            TreeNode<K,V> first = (TreeNode<K,V>)tab[index], root = first, rl;
+            TreeNode<K,V> succ = (TreeNode<K,V>)next, pred = prev;
+            if (pred == null)
+                tab[index] = first = succ;
+            else
+                pred.next = succ;
+            if (succ != null)
+                succ.prev = pred;
+            if (first == null)
+                return;
+            if (root.parent != null)
+                root = root.root();
+            if (root == null
+                || (movable
+                    && (root.right == null
+                        || (rl = root.left) == null
+                        || rl.left == null))) {
+                tab[index] = first.untreeify(map);
+                return;
+            }
+            TreeNode<K,V> p = this, pl = left, pr = right, replacement;
+            if (pl != null && pr != null) {
+                TreeNode<K,V> s = pr, sl;
+                while ((sl = s.left) != null)
+                    s = sl;
+                boolean c = s.red; s.red = p.red; p.red = c;
+                TreeNode<K,V> sr = s.right;
+                TreeNode<K,V> pp = p.parent;
+                if (s == pr) {
+                    p.parent = s;
+                    s.right = p;
+                }
+                else {
+                    TreeNode<K,V> sp = s.parent;
+                    if ((p.parent = sp) != null) {
+                        if (s == sp.left)
+                            sp.left = p;
+                        else
+                            sp.right = p;
+                    }
+                    if ((s.right = pr) != null)
+                        pr.parent = s;
+                }
+                p.left = null;
+                if ((p.right = sr) != null)
+                    sr.parent = p;
+                if ((s.left = pl) != null)
+                    pl.parent = s;
+                if ((s.parent = pp) == null)
+                    root = s;
+                else if (p == pp.left)
+                    pp.left = s;
+                else
+                    pp.right = s;
+                if (sr != null)
+                    replacement = sr;
+                else
+                    replacement = p;
+            }
+            else if (pl != null)
+                replacement = pl;
+            else if (pr != null)
+                replacement = pr;
+            else
+                replacement = p;
+            if (replacement != p) {
+                TreeNode<K,V> pp = replacement.parent = p.parent;
+                if (pp == null)
+                    (root = replacement).red = false;
+                else if (p == pp.left)
+                    pp.left = replacement;
+                else
+                    pp.right = replacement;
+                p.left = p.right = p.parent = null;
+            }
+
+            TreeNode<K,V> r = p.red ? root : balanceDeletion(root, replacement);
+
+            if (replacement == p) {
+                TreeNode<K,V> pp = p.parent;
+                p.parent = null;
+                if (pp != null) {
+                    if (p == pp.left)
+                        pp.left = null;
+                    else if (p == pp.right)
+                        pp.right = null;
+                }
+            }
+            if (movable)
+                moveRootToFront(tab, r);
+        }
+
         /**
          * 扩容时，将树的节点，拆开
          *
@@ -593,18 +767,39 @@ public class CraneHashMap<K,V> {
             }
         }
 
+        /**
+         * 爷爷 (pp)                      爷爷 (pp)
+         *        |                         |
+         *      (p)      --【左旋】-->        r
+         *     /  \                        / \
+         *   A    (r)                   (p)  B（黑的）
+         *       /  \                   / \
+         *     (rl) B（肯定黑的）        A (rl)
+         */
         static <K,V> TreeNode<K,V> rotateLeft(TreeNode<K,V> root,
                                               TreeNode<K,V> p) {
-            TreeNode<K,V> r, pp, rl;
-            if (p != null && (r = p.right) != null) {
+            TreeNode<K,V> r // p的右孩子，左旋后，成为新的p
+                , pp // p的父节点
+                , rl;
+            if (p != null &&
+                (r = p.right) != null // 右孩子为空，不能左旋
+            ) {
                 if ((rl = p.right = r.left) != null)
+                    // rl不空，调整rl的parent指针，为空
                     rl.parent = p;
-                if ((pp = r.parent = p.parent) == null)
+
+                if ((pp = r.parent = p.parent) // 将p的parent调整为r的parent
+                    == null)
+                    // 如果pp为null，说明p就是root
+                    // 调整root的颜色
                     (root = r).red = false;
                 else if (pp.left == p)
+                    // p是左孩子，将pp的left，指向新的p
                     pp.left = r;
                 else
+                    // p是右孩子，将pp的right，指向新的p
                     pp.right = r;
+                // 调整p和r的关系
                 r.left = p;
                 p.parent = r;
             }
@@ -631,27 +826,61 @@ public class CraneHashMap<K,V> {
 
         static <K,V> TreeNode<K,V> balanceInsertion(TreeNode<K,V> root,
                                                     TreeNode<K,V> x) {
+            // 刚插入的节点是红色的
             x.red = true;
-            for (TreeNode<K,V> xp, xpp, xppl, xppr;;) {
+            for (TreeNode<K,V> xp // 父节点
+                , xpp // 祖父节点
+                , xppl // 左叔父，父节点的左兄弟
+                , xppr // 右叔父，父节点的右兄弟
+                ;;) {
                 if ((xp = x.parent) == null) {
+                    // 当前父节点为null，即根节点，变黑了事
                     x.red = false;
                     return x;
                 }
                 else if (!xp.red || (xpp = xp.parent) == null)
+                    // 父节点是黑的，或者父节点是root，
+                    // 父节点是root，但xp.red也是红，可能是中间状态，后续还会调整的。
                     return root;
+
+                // 后续父节点的颜色，肯定是红的，因为，!xp.red，在上面的else if已经返回了
                 if (xp == (xppl = xpp.left)) {
+                    // 父节点左节点
                     if ((xppr = xpp.right) != null && xppr.red) {
+                        // 如果右叔父也是红的
+                        // 把父节点和叔父节点都变黑，祖父节点变红。等于在祖父节点处，插入了红的。
+                        // 同时以祖父为root的子树，已经满足要求了
                         xppr.red = false;
                         xp.red = false;
                         xpp.red = true;
+                        // 递归调整祖父节点
                         x = xpp;
-                    }
-                    else {
+                    } else {
+                        // 右叔父是黑的
+                        /**
+                         *          pp黑H                       xpp黑H    --【右旋】-->     黑D
+                         *        /    \                       /   \                     /   \
+                         *      xp红B  xppr黑J  --【左旋】-->  xp红D xppr黑J              红B   红H
+                         *     /  \                          /  \                     /  \   /  \
+                         *   黑A  x红D                     x红B  黑E                 黑A  黑C 黑E 黑J
+                         *       /  \                     /  \
+                         *     黑C 黑E                   黑A  黑C
+                         *
+                         * 如果开始时，是右孩子，比如【红D】，则需要先左旋。
+                         */
+
                         if (x == xp.right) {
+                            // 如果当前节点是右孩子，则将父节点xp左旋，将xp变成左孩子，x变成父节点
+                            // 将xp和p调换，现在变成x左孩子，红的，xp左节点红，xppl，右节点，黑的
                             root = rotateLeft(root, x = xp);
                             xpp = (xp = x.parent) == null ? null : xp.parent;
+
+                            // 这里为什么要左旋呢？
+                            // 因为下面右旋xpp，并且要把xpp变红，如果x在右边，则x变成xpp的左孩子，那么两个都是红的了
                         }
+                        //当前节点状态： x左孩子，红的；xp左节点，红；xppl，右节点，黑的
                         if (xp != null) {
+                            // 将xp变黑，则xpp的左
                             xp.red = false;
                             if (xpp != null) {
                                 xpp.red = true;
@@ -659,8 +888,7 @@ public class CraneHashMap<K,V> {
                             }
                         }
                     }
-                }
-                else {
+                } else {
                     if (xppl != null && xppl.red) {
                         xppl.red = false;
                         xp.red = false;
@@ -678,6 +906,98 @@ public class CraneHashMap<K,V> {
                                 xpp.red = true;
                                 root = rotateLeft(root, xpp);
                             }
+                        }
+                    }
+                }
+            }
+        }
+
+        static <K,V> TreeNode<K,V> balanceDeletion(TreeNode<K,V> root,
+                                                   TreeNode<K,V> x) {
+            for (TreeNode<K,V> xp, xpl, xpr;;) {
+                if (x == null || x == root)
+                    return root;
+                else if ((xp = x.parent) == null) {
+                    x.red = false;
+                    return x;
+                }
+                else if (x.red) {
+                    x.red = false;
+                    return root;
+                }
+                else if ((xpl = xp.left) == x) {
+                    if ((xpr = xp.right) != null && xpr.red) {
+                        xpr.red = false;
+                        xp.red = true;
+                        root = rotateLeft(root, xp);
+                        xpr = (xp = x.parent) == null ? null : xp.right;
+                    }
+                    if (xpr == null)
+                        x = xp;
+                    else {
+                        TreeNode<K,V> sl = xpr.left, sr = xpr.right;
+                        if ((sr == null || !sr.red) &&
+                            (sl == null || !sl.red)) {
+                            xpr.red = true;
+                            x = xp;
+                        }
+                        else {
+                            if (sr == null || !sr.red) {
+                                if (sl != null)
+                                    sl.red = false;
+                                xpr.red = true;
+                                root = rotateRight(root, xpr);
+                                xpr = (xp = x.parent) == null ?
+                                    null : xp.right;
+                            }
+                            if (xpr != null) {
+                                xpr.red = (xp == null) ? false : xp.red;
+                                if ((sr = xpr.right) != null)
+                                    sr.red = false;
+                            }
+                            if (xp != null) {
+                                xp.red = false;
+                                root = rotateLeft(root, xp);
+                            }
+                            x = root;
+                        }
+                    }
+                }
+                else {
+                    if (xpl != null && xpl.red) {
+                        xpl.red = false;
+                        xp.red = true;
+                        root = rotateRight(root, xp);
+                        xpl = (xp = x.parent) == null ? null : xp.left;
+                    }
+                    if (xpl == null)
+                        x = xp;
+                    else {
+                        TreeNode<K,V> sl = xpl.left, sr = xpl.right;
+                        if ((sl == null || !sl.red) &&
+                            (sr == null || !sr.red)) {
+                            xpl.red = true;
+                            x = xp;
+                        }
+                        else {
+                            if (sl == null || !sl.red) {
+                                if (sr != null)
+                                    sr.red = false;
+                                xpl.red = true;
+                                root = rotateLeft(root, xpl);
+                                xpl = (xp = x.parent) == null ?
+                                    null : xp.left;
+                            }
+                            if (xpl != null) {
+                                xpl.red = (xp == null) ? false : xp.red;
+                                if ((sl = xpl.left) != null)
+                                    sl.red = false;
+                            }
+                            if (xp != null) {
+                                xp.red = false;
+                                root = rotateRight(root, xp);
+                            }
+                            x = root;
                         }
                     }
                 }
