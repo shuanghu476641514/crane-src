@@ -5,6 +5,11 @@ import java.lang.reflect.Type;
 import java.util.Map;
 import java.util.Objects;
 
+/**
+ * Hash表内桶数据里存储的是key的hash值
+ *
+ * 当list变成tree的时候，list还是维持的
+ */
 public class CraneHashMap<K,V> {
 
     // 默认的初始化容量，16
@@ -141,6 +146,16 @@ public class CraneHashMap<K,V> {
 
     public V put(K key, V value) {
         return putVal(hash(key), key, value, false, true);
+    }
+
+    /**
+     * 删除一个key
+     */
+    public V remove(Object key) {
+        Node<K,V> e;
+        // 删除node并返回
+        return (e = removeNode(hash(key), key, null, false, true)) == null ?
+            null : e.value;
     }
 
     /**
@@ -352,23 +367,48 @@ public class CraneHashMap<K,V> {
         }
     }
 
+    /**
+     * 根据hash和key，删除node
+     *
+     * @param hash hash值
+     * @param key 原始key
+     * @param value 原始value
+     * @param matchValue 是否通过value进行删除
+     * @param movable true，允许将tree退化为list
+     * @return 被删除的node
+     */
     final Node<K,V> removeNode(int hash, Object key, Object value,
                                boolean matchValue, boolean movable) {
-        Node<K,V>[] tab; Node<K,V> p; int n, index;
-        if ((tab = table) != null && (n = tab.length) > 0 &&
-            (p = tab[index = (n - 1) & hash]) != null) {
-            Node<K,V> node = null, e; K k; V v;
+        Node<K,V>[] tab; // hash表指针
+        Node<K,V> p; // 待删除节点的父节点
+        int n, // hash表长度
+            index; //
+        if ((tab = table) != null // hash表不为null
+            && (n = tab.length) > 0 // hash表长度大于0
+            && (p = tab[
+                    index = (n - 1) // 长度减1，用于定位index。n=15,index=1111
+                    & hash]) != null // hash值对应的位置不为空
+        ) {
+            Node<K,V> node = null, // 目标node
+                e; // 当前node链表位置
+            K k;
+            V v;
             if (p.hash == hash &&
                 ((k = p.key) == key || (key != null && key.equals(k))))
+                // Node链表头元素，恰好是目标node
                 node = p;
             else if ((e = p.next) != null) {
+                // 遍历整个桶
                 if (p instanceof TreeNode)
+                    // 桶内是BR树
                     node = ((TreeNode<K,V>)p).getTreeNode(hash, key);
                 else {
+                    // 桶内是链表，遍历链表
                     do {
                         if (e.hash == hash &&
                             ((k = e.key) == key ||
                              (key != null && key.equals(k)))) {
+                            // 相等的判断：1、hash值相等；2、key相等
                             node = e;
                             break;
                         }
@@ -376,13 +416,22 @@ public class CraneHashMap<K,V> {
                     } while ((e = e.next) != null);
                 }
             }
-            if (node != null && (!matchValue || (v = node.value) == value ||
-                                 (value != null && value.equals(v)))) {
+
+            if (node != null //找到node
+                && (!matchValue // 对比value，如果matchValue为False，则直接进入下面的处理
+                    || (v = node.value) == value // value ==
+                    || (value != null && value.equals(v))
+                    )
+            ) {
                 if (node instanceof TreeNode)
+                    // 树节点，删除节点
                     ((TreeNode<K,V>)node).removeTreeNode(this, tab, movable);
                 else if (node == p)
+                    // 父节点和node一样，说明是head
+                    // 如果是桶的头节点，则桶的head，改为next
                     tab[index] = node.next;
                 else
+                    // 正常的链表删除，父节点next指向node的next
                     p.next = node.next;
                 ++modCount;
                 --size;
@@ -397,6 +446,9 @@ public class CraneHashMap<K,V> {
         return new Node<>(hash, key, value, next);
     }
 
+    /**
+     * 将TreeNode，重新变成Node
+     */
     Node<K,V> replacementNode(Node<K,V> p, Node<K,V> next) {
         return new Node<>(p.hash, p.key, p.value, next);
     }
@@ -465,28 +517,38 @@ public class CraneHashMap<K,V> {
                 int ph, dir; K pk;
                 TreeNode<K,V> pl = p.left, pr = p.right, q;
                 if ((ph = p.hash) > h)
+                    // 比当前节点小，目标值，在left
                     p = pl;
                 else if (ph < h)
                     p = pr;
                 else if ((pk = p.key) == k || (k != null && k.equals(pk)))
+                    // key相等，返回
                     return p;
                 else if (pl == null)
+                    // hash值正好和当前节点一样，hash碰撞
+                    // 如果左孩子为空，则肯定在右孩子里
                     p = pr;
                 else if (pr == null)
+                    // hash值正好和当前节点一样，hash碰撞
+                    // 如果右孩子为空，则肯定在左孩子里
                     p = pl;
                 else if ((kc != null ||
                           (kc = comparableClassFor(k)) != null) &&
                          (dir = compareComparables(kc, k, pk)) != 0)
                     p = (dir < 0) ? pl : pr;
                 else if ((q = pr.find(h, k, kc)) != null)
+                    // 实在不知道当前hash值会在哪个子孩子处，则先尝试在pr右孩子处查询
                     return q;
                 else
+                    // 右孩子没有，再在pl左孩子处查询
                     p = pl;
             } while (p != null);
             return null;
         }
 
         final TreeNode<K,V> getTreeNode(int h, Object k) {
+            // 如果当前查找节点不是根节点，则强行回到根节点
+            // parent != null，则不是根节点，强行回到根节点
             return ((parent != null) ? root() : this).find(h, k, null);
         }
 
@@ -558,6 +620,7 @@ public class CraneHashMap<K,V> {
 
         final Node<K,V> untreeify(CraneHashMap<K,V> map) {
             Node<K,V> hd = null, tl = null;
+            // 沿着双向链表遍历，退化成单向链表
             for (Node<K,V> q = this; q != null; q = q.next) {
                 Node<K,V> p = map.replacementNode(q, null);
                 if (tl == null)
@@ -615,45 +678,116 @@ public class CraneHashMap<K,V> {
             }
         }
 
+        /**
+         * 把node（this）从RB树里删除
+         *
+         * 1、删除节点后，先判断是否节点数过少，过少，退化成链表
+         *
+         * 2、不能退化成链表，则调整RB
+         *
+         * 3、先解决节点删除后，孩子节点的父节点；
+         * 3.1、叶子节点，删除后，无需新的父节点
+         * 3.2、单孩子节点，删除后，直接把孩子节点交给父节点；
+         * 3.3、双孩子节点，删除后，找到RB树的中序遍历的后继节点替代自己，即右孩子的最左孙子节点。
+         * 3.3.1、交换2者的值
+         * 3.3.2、改为删除最左孙子节点
+         *
+         * 4、删除的是红节点，不需要调整
+         *
+         * 5、删除的是黑节点，需要调整
+         */
         final void removeTreeNode(CraneHashMap<K,V> map, Node<K,V>[] tab,
                                   boolean movable) {
-            int n;
+            int n;// 桶数组长度
             if (tab == null || (n = tab.length) == 0)
+                // 为空
                 return;
+            // 桶的index
             int index = (n - 1) & hash;
-            TreeNode<K,V> first = (TreeNode<K,V>)tab[index], root = first, rl;
-            TreeNode<K,V> succ = (TreeNode<K,V>)next, pred = prev;
+            TreeNode<K,V> first = (TreeNode<K,V>)tab[index], // 桶的first
+                root = first, //tree的root，暂定
+                rl;
+            TreeNode<K,V> succ = (TreeNode<K,V>)next, // list后继
+                pred = prev; // list的前继
             if (pred == null)
+                // 没有前继，被删除的，就是桶的first节点，让后继next成为first
                 tab[index] = first = succ;
             else
+                // 前继的next指向next，删除当前节点
                 pred.next = succ;
+
             if (succ != null)
+                // 后继不为空，则后继的prev，指向前继
                 succ.prev = pred;
+
             if (first == null)
+                // 桶内就一个元素，删除后，桶为空，不需要继续操作了
                 return;
+
             if (root.parent != null)
+                // 桶的first不是root，找到真正的root
                 root = root.root();
+
             if (root == null
                 || (movable
-                    && (root.right == null
-                        || (rl = root.left) == null
-                        || rl.left == null))) {
+                    && (root.right == null // 右节点空，则最多2个节点
+                        || (rl = root.left) == null // 左节点空，最多2个节点
+                        || rl.left == null) // 右节点不空，左孙子节点空，则树最多有：root、左孩子、右孩子，右孩子的2孩子
+            )) {
+                // 退化成链表
                 tab[index] = first.untreeify(map);
                 return;
             }
-            TreeNode<K,V> p = this, pl = left, pr = right, replacement;
+            // 树节点还很多
+            TreeNode<K,V> p = this, pl = left, pr = right,
+                replacement; // p节点删除后，p原来的位置，谁顶上
             if (pl != null && pr != null) {
-                TreeNode<K,V> s = pr, sl;
+                // 左右孩子都不空
+                TreeNode<K,V> s = pr,// 找到右孩子的最左的节点，来替换当前被删除的节点
+                    sl;
                 while ((sl = s.left) != null)
                     s = sl;
-                boolean c = s.red; s.red = p.red; p.red = c;
+
+                //替换节点的颜色，变成待删除节点颜色
+                boolean c = s.red;
+                s.red = p.red;
+                p.red = c;
+                // 待删除节点颜色，变成替换节点
+                // 交换树位置，不交换数据.TreeMap是交换数据。因为HashMap的Node比较复杂，有pre/next等双向链表的指针关系
                 TreeNode<K,V> sr = s.right;
                 TreeNode<K,V> pp = p.parent;
                 if (s == pr) {
+                    // 替换节点正好就是删除节点的右孩子
+                    /**
+                     *           F()pp                              F
+                     *            \                                  \
+                     *             H(待删除)p                           J
+                     *               \                                 \
+                     *               J(待替换)pr/s   ===>                H
+                     *                  \
+                     *                  L()sr
+                     */
                     p.parent = s;
                     s.right = p;
                 }
                 else {
+                    /**
+                     *        [ p ] (准备被删的节点)
+                     *        /   ▲
+                     *       /     \
+                     *     ...     [ pr ] (p的右孩子)
+                     *              /   ▲
+                     *             /     \
+                     *           [ ... ]  \
+                     *            /        \
+                     *          [ sp ] (s的原父亲)
+                     *          /   ▲
+                     *         /
+                     *       [ s ]
+                     *          \
+                     *          sr
+                     */
+                    // 两者层级离的比较远
                     TreeNode<K,V> sp = s.parent;
                     if ((p.parent = sp) != null) {
                         if (s == sp.left)
@@ -661,45 +795,87 @@ public class CraneHashMap<K,V> {
                         else
                             sp.right = p;
                     }
-                    if ((s.right = pr) != null)
+                    /**
+                     *        [  ] (准备被删的节点)
+                     *        /   ▲
+                     *       /     \
+                     *     ...     [ pr ] (p的右孩子)
+                     *              /   ▲
+                     *             /     \
+                     *           [ ... ]  \
+                     *            /        \
+                     *          [ sp ] (s的原父亲)
+                     *          /
+                     *         /
+                     *       [ p ] [s]
+                     */
+                    if ((s.right = pr) != null) // 把之前p的右节点赋给s
+                        // 如果p的右孩子不为空，则把p的右孩子的parent指向s
                         pr.parent = s;
+                    // 等于是交换了s和p，及两者的右孩子，但s的左孩子还没有指向p的左孩子
                 }
+
+                // p现在已经和s交换了，左孩子为空了
                 p.left = null;
                 if ((p.right = sr) != null)
+                    // 将s的右孩子调整为p的
                     sr.parent = p;
                 if ((s.left = pl) != null)
+                    // 将s左孩子调整为p的
                     pl.parent = s;
-                if ((s.parent = pp) == null)
+
+                if ((s.parent = pp) == null)// p的parent调整为s的
+                    // p之前是root
                     root = s;
                 else if (p == pp.left)
+                    // p之前是左节点，s现在是p.parent的左节点
                     pp.left = s;
                 else
+                    // p之前是右节点，s现在是p.parent的右节点
                     pp.right = s;
+
                 if (sr != null)
+                    // 有右孩子，不可能有左孩子的，因为s是和p最邻近的节点，如果s有左孩子，则s会被自己左孩子替代
                     replacement = sr;
                 else
+                    // p的所有孩子节点都是null
                     replacement = p;
             }
             else if (pl != null)
+                // 左孩子不为null，右孩子为null，删除之后，把左孩子顶上去
                 replacement = pl;
             else if (pr != null)
+                // 右孩子不为null，左孩子为null，删除之后，把右孩子顶上去
                 replacement = pr;
             else
+                // 左右孩子都是null，那直接删除了
                 replacement = p;
+
+            // 如果p有孩子节点，则直接把孩子节点顶上去，删除节点p，然后，再调整颜色
+            // 如果p是叶子节点，则先调整颜色，再删除p
             if (replacement != p) {
-                TreeNode<K,V> pp = replacement.parent = p.parent;
+                // p有孩子节点，删除之后，要顶上去
+                TreeNode<K,V> pp =
+                    replacement.parent = p.parent; // 先把p的parent赋给replacement
                 if (pp == null)
+                    // p就是root节点，更改root的颜色为黑
                     (root = replacement).red = false;
                 else if (p == pp.left)
+                    // p是左节点
                     pp.left = replacement;
                 else
+                    // p是右节点
                     pp.right = replacement;
+                // 将节点p删掉，孩子及父节点关系，都清空
                 p.left = p.right = p.parent = null;
             }
 
+            // 删除的是红色节点，则不需要调整，是黑色节点，则需要调整
             TreeNode<K,V> r = p.red ? root : balanceDeletion(root, replacement);
-
+            //
             if (replacement == p) {
+                // 如果删除的p是叶子节点，则清理相关指针
+                // p的parent，及parent的孩子节点
                 TreeNode<K,V> pp = p.parent;
                 p.parent = null;
                 if (pp != null) {
@@ -824,8 +1000,30 @@ public class CraneHashMap<K,V> {
             return root;
         }
 
+        /**
+         * 1、插入节点是红的
+         *
+         * 2、插入时root，直接变红
+         *
+         * 3、父节点是黑的，结束
+         *
+         * 4、父节点是红的，叔父节点也是红的，那么将父节点和叔父节点变黑，祖父节点变红，递归调整祖父节点。
+         *
+         * 5、父节点xp是红的，叔父节点是黑的。父节点是左孩子
+         *
+         *  5.1、插入x的是右节点，xp左旋，交换x和xp指针；变成x为左孩子
+         *
+         *  5.2、父节点变黑，祖父节点变红，祖父节点右旋；调整完成
+         *
+         * 6、父节点xp是红的，叔父节点是黑的。父节点是右孩子
+         *
+         *  6.1、插入x的是左节点，xp右旋，交换x和xp指针；变成x为右孩子
+         * <p>
+         *  6.2、父节点变黑，祖父节点变红，祖父节点左旋；调整完成
+         */
         static <K,V> TreeNode<K,V> balanceInsertion(TreeNode<K,V> root,
                                                     TreeNode<K,V> x) {
+
             // 刚插入的节点是红色的
             x.red = true;
             for (TreeNode<K,V> xp // 父节点
@@ -839,7 +1037,7 @@ public class CraneHashMap<K,V> {
                     return x;
                 }
                 else if (!xp.red || (xpp = xp.parent) == null)
-                    // 父节点是黑的，或者父节点是root，
+                    // 父节点是黑的，或者祖父节点是root，
                     // 父节点是root，但xp.red也是红，可能是中间状态，后续还会调整的。
                     return root;
 
@@ -856,7 +1054,7 @@ public class CraneHashMap<K,V> {
                         // 递归调整祖父节点
                         x = xpp;
                     } else {
-                        // 右叔父是黑的
+                        // 右叔父是黑的， 如果右叔父是红的，则在上面已经处理了
                         /**
                          *          pp黑H                       xpp黑H    --【右旋】-->     黑D
                          *        /    \                       /   \                     /   \
@@ -912,74 +1110,210 @@ public class CraneHashMap<K,V> {
             }
         }
 
+        /**
+         * 删除黑色节点后，调整树。删除root，则不需要
+         *
+         * 删除一个黑色节点后，树的黑色数量就不一致了，所以，需要调整
+         */
         static <K,V> TreeNode<K,V> balanceDeletion(TreeNode<K,V> root,
                                                    TreeNode<K,V> x) {
+            // 1、变成双黑兄弟
+            // 1.1 如果右兄弟xpr是红，（此时，父节点肯定是黑的，右兄弟的2孩子也是黑的）
+            //  那么则将xpr变黑，xp变红，则左旋xp。则变成xp红，x黑，xpr也黑了，是之前右兄弟的左黑孩子
+            // 2、如果右黑兄弟xpr的是双黑孩子（双黑侄子），那么xpr变红，则右子树的黑少1，以xp为root的树黑少1
+            //   无论此时xp的节点是什么，整棵树黑都-1，xp的左右孩子都-1了，那么递归调整xp
+            // 3、如果右黑兄弟xpr的孩子，一红一黑，则需要左黑右红
+            // 3.1 如果xpr的孩子是左红右黑=> 右兄弟变红，右兄弟左孩子变黑，右兄弟右旋。变成左黑右红
+            // 4、将xpr和xp颜色交换，xp变黑，xpr保持xp颜色，xpr的右孩子从红变黑，黑度+1
             for (TreeNode<K,V> xp, xpl, xpr;;) {
                 if (x == null || x == root)
+                    // 如果是root，或者x已经是null，则返回
                     return root;
                 else if ((xp = x.parent) == null) {
+                    // 已经递归遍历到了root，把root改成黑色，则完成调整
                     x.red = false;
                     return x;
                 }
                 else if (x.red) {
+                    // 删除了一个黑节点，现在遇到了一个红节点，把红色染黑，正好替补少的那个黑色的度
                     x.red = false;
                     return root;
                 }
                 else if ((xpl = xp.left) == x) {
+                    // 待调整的节点是左孩子
                     if ((xpr = xp.right) != null && xpr.red) {
+                        // x的右兄弟是红色的
+                        // 将右兄弟变黑，父节点变红
+                        // 再将父节点左旋，右兄弟成父节点
+                        /**
+                         *                [ xp: 50 黑]
+                         *                 /      \
+                         *       (黑高-1) /        \
+                         *         [ x: 25 黑 ]   [ xpr: 80 红 ]
+                         *                        /       \
+                         *                 [ sl: 60 黑]  [ sr: 90 黑]
+                         */
                         xpr.red = false;
                         xp.red = true;
+                        /**
+                         *                [ xp: 50 ] (红 ◀ 变红)
+                         *                 /      \
+                         *         [ x: 25 黑 ]   [ xpr: 80 ] (黑 ◀ 变黑)
+                         *                        /       \
+                         *                  [ sl: 60 ]  [ sr: 90 ]
+                         */
                         root = rotateLeft(root, xp);
+                        /**
+                         *                        [ xpr: 80 ] (黑)
+                         *                         /        \
+                         *                [ xp: 50 ] (红)   [ sr: 90 ] (黑)
+                         *                 /       \
+                         *            [ x: 25 ]  [ sl: 60 ] (黑)
+                         */
                         xpr = (xp = x.parent) == null ? null : xp.right;
-                    }
+                        /**
+                         *                        [ 80 ] (黑)
+                         *                       /      \
+                         *              [ xp: 50 ] (红)  [ 90 ] (黑)
+                         *               /      \
+                         *          [ x: 25 ]  [ xpr: 60 ] (黑 ◀ xpr 成功换到黑兄弟身上)
+                         */
+                    }// 这个if的作用，就是将删除节点和兄弟节点都变成黑的，即“双黑兄弟”
+
                     if (xpr == null)
+                        // TODO 右兄弟，不应该为null的
+                        // 为null，则用父节点去补，假设删除的是父节点，去递归
                         x = xp;
                     else {
+                        // 兄弟节点是黑的
                         TreeNode<K,V> sl = xpr.left, sr = xpr.right;
                         if ((sr == null || !sr.red) &&
                             (sl == null || !sl.red)) {
+                            // 同时，黑兄弟的2个孩子都是黑的（或null），那么把兄弟变红，左右就平衡了
+                            // 但父节点所在的子树，黑高少了1，那么以父节点为待删除节点，继续调整
                             xpr.red = true;
                             x = xp;
-                        }
-                        else {
+                        } else {
                             if (sr == null || !sr.red) {
+                                // xpr的2孩子是左红右黑。
+                                /**
+                                 *                        [ xp:80 ] (黑)
+                                 *                       /      \
+                                 *              [ x: 50: B]   [ xpr：90：B ]
+                                 *                              /        \
+                                 *                        [ sl: 85: R ]    [ sr: 100:B ]
+                                 *                            /      \
+                                 *                         [甲：B]  [乙: B] 【sl是红的，那么甲乙肯定是黑的】
+                                 */
+
                                 if (sl != null)
+                                    // sl必定是红的，如果sl是黑的，sr也是黑的，那xpr就是2个黑孩子【上面已经处理了】
                                     sl.red = false;
                                 xpr.red = true;
                                 root = rotateRight(root, xpr);
+                                /**
+                                 *                        [ xp:80 ]
+                                 *                       /      \
+                                 *              [ x: 50: B]   [ sl: 85: B ]
+                                 *                              /        \
+                                 *                        [ 甲 ]        [ xpr：90：R ]
+                                 *                                         /   \
+                                 *                                      [乙]    [ sr: 100:B ]
+                                 */
+
                                 xpr = (xp = x.parent) == null ?
                                     null : xp.right;
+                                /**
+                                 *                        [ xp:80 ]
+                                 *                       /      \
+                                 *              [ x: 50: B]   [ xpr: 85: B ]
+                                 *                              /        \
+                                 *                        [ 甲：B ]     [ 90：R ]
+                                 *                                         /   \
+                                 *                                   [乙：B]    [ sr: 100:B ]
+                                 */
                             }
+
                             if (xpr != null) {
+                                /**
+                                 *                       [ xp:80 ]P颜色
+                                 *                       /      \
+                                 *             [ x: 50: B]   [ xpr: 85: B ]
+                                 *                             /        \
+                                 *                     [ 甲：B ]     [ sr：90：R ]
+                                 *                                      /   \
+                                 *                                [乙：B]   [100:B ]
+                                 */
                                 xpr.red = (xp == null) ? false : xp.red;
                                 if ((sr = xpr.right) != null)
+                                    // 刚才上面调整时，sr的指针已经错了。【if (sr == null || !sr.red)】
+                                    // 这里重新指向
                                     sr.red = false;
+                                /**
+                                 *                       [ xp:80 ]P颜色
+                                 *                       /      \
+                                 *             [ x: 50: B]   [ xpr: 85: P颜色 ]
+                                 *                             /        \
+                                 *                     [ 甲：B ]     [ sr：90：B ]【R->B】
+                                 *                                      /   \
+                                 *                                [乙：B]   [100:B ]
+                                 */
                             }
                             if (xp != null) {
+                                // 这个地方和上面连在一起看，就是交换了xp和xpr的颜色。同时sr的颜色，从红变黑，黑的节点+1
                                 xp.red = false;
+                                /**
+                                 *                       [ xp:80:B ]
+                                 *                       /      \
+                                 *             [ x: 50: B]   [ xpr: 85: P颜色 ]
+                                 *                             /        \
+                                 *                     [ 甲：B ]     [ sr：90：B ]【R->B，黑+1】
+                                 *                                      /   \
+                                 *                                [乙：B]   [100:B ]
+                                 */
                                 root = rotateLeft(root, xp);
+                                // 左旋之后
+                                /**
+                                 *                        [ xpr: 85: P颜色 ]
+                                 *                       /      \
+                                 *            [ xp:80:B ]   [ sr：90：B ]【R->B，黑+1】
+                                 *              /     \              /    \
+                                 *   [ x: 50: B]     [ 甲：B ]   [乙：B]   [100:B ]
+                                 *
+                                 *
+                                 */
                             }
                             x = root;
                         }
                     }
-                }
-                else {
+                } else {
+                    // 被删除的右节点
                     if (xpl != null && xpl.red) {
+                        // 左兄弟是红的
+                        // 父节点必然是黑，左兄弟的孩子也是黑的
                         xpl.red = false;
                         xp.red = true;
                         root = rotateRight(root, xp);
                         xpl = (xp = x.parent) == null ? null : xp.left;
+                        // 将左兄弟变黑，父节点变红。
+                        // 父节点右旋，将左兄弟的黑右孩子，变成和x新的左兄弟，双黑兄弟
                     }
                     if (xpl == null)
+                        // 左兄弟，不应该是空的，如果是空的，则调整父节点xp
                         x = xp;
                     else {
+                        //
                         TreeNode<K,V> sl = xpl.left, sr = xpl.right;
                         if ((sl == null || !sl.red) &&
                             (sr == null || !sr.red)) {
+                            // 左黑兄弟有2个黑孩子（或null）
                             xpl.red = true;
                             x = xp;
-                        }
-                        else {
+                            // 将左兄弟从黑变红，拉低左兄弟的黑节点层级和x匹配，则xp为根的子树，整体高，减1
+                            // 两种情况：
+                            // 1、xp是红的，则下一轮循环里，会将红色变成黑色，正好补足
+                            // 2、xp是黑的，那继续向上调整
+                        } else {
                             if (sl == null || !sl.red) {
                                 if (sr != null)
                                     sr.red = false;

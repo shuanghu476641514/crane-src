@@ -310,7 +310,7 @@ public class RedBlackTree {
                 } else {
                     // 右兄弟的孩子，有黑有红
                     if (colorOf(rightOf(sib)) == BLACK) {
-                        // 右兄弟的右孩子是黑的
+                        // 右兄弟的右孩子是黑的，左孩子必定是红
                         /**
                          *              60
                          *           /     \
