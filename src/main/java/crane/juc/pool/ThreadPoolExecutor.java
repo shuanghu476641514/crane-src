@@ -23,6 +23,7 @@ public class ThreadPoolExecutor extends AbstractExecutorService {
 
     private final AtomicInteger ctl = new AtomicInteger(ctlOf(RUNNING, 0));
     private static final int COUNT_BITS = Integer.SIZE - 3;
+    // 高三位是0 000 11111111111111111111111111111
     private static final int COUNT_MASK = (1 << COUNT_BITS) - 1;
 
     private static final int RUNNING    = -1 << COUNT_BITS;
@@ -39,6 +40,23 @@ public class ThreadPoolExecutor extends AbstractExecutorService {
         return c < s;
     }
 
+    /**
+     * 因为，用高3位来表示状态，所以，低位的线程计数，不影响整个比较
+     *
+     * 111 表示RUNNING （补码中它是负数，1是符号位）
+     * 000 表示SHUTDOWN
+     * 001 表示STOP
+     * 010 TIDYING
+     * 011 TERMINATED
+     *
+     * RUNNING < SHUTDOWN < STOP < TIDYING < TERMINATED
+     *
+     * 判断线程池是否关闭，所以只需要 c>=SHUTDOWN
+     *
+     * @param c 当前的线程计数及状态
+     * @param s 预期状态
+     *
+     */
     private static boolean runStateAtLeast(int c, int s) {
         return c >= s;
     }
@@ -257,24 +275,31 @@ public class ThreadPoolExecutor extends AbstractExecutorService {
         return taskList;
     }
 
+    /**
+     * 添加任务
+     */
     private boolean addWorker(Runnable firstTask, boolean core) {
         retry:
         for (int c = ctl.get();;) {
 
-            if (runStateAtLeast(c, SHUTDOWN)
+            if (runStateAtLeast(c, SHUTDOWN) // 线程池开始关闭
                 && (runStateAtLeast(c, STOP)
-                    || firstTask != null
-                    || workQueue.isEmpty()))
+                    || firstTask != null // 已经SHUTDOWN，并且，这是新的task
+                    || workQueue.isEmpty()) //
+            )
+                // 不能再接收新任务了
                 return false;
 
             for (;;) {
                 if (workerCountOf(c)
-                    >= ((core ? corePoolSize : maximumPoolSize) & COUNT_MASK))
+                    >= ((core ? corePoolSize : maximumPoolSize) & COUNT_MASK))//& COUNT_MASK,防止越位
+                    // 线程数已经够多了
                     return false;
                 if (compareAndIncrementWorkerCount(c))
                     break retry;
                 c = ctl.get();
                 if (runStateAtLeast(c, SHUTDOWN))
+                    // 创建线程的过程中，线程池关闭了
                     continue retry;
 
             }
@@ -464,6 +489,7 @@ public class ThreadPoolExecutor extends AbstractExecutorService {
         if (workerCountOf(c) < corePoolSize) {
             // 如果没有到核心线程数，则新建线程
             if (addWorker(command, true))
+                // 创建线程失败
                 return;
             c = ctl.get();
         }
